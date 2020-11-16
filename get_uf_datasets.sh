@@ -1,9 +1,9 @@
 #!/bin/bash
 
 if [ "$#" -eq 0 ]; then
-    MTX_DIR = mtx
+    $MTX_DIR = mtx
 else
-	MTX_DIR = $1
+	$MTX_DIR = $1
 fi
 
 # Make temporary directory for download/unpack
@@ -11,7 +11,7 @@ mkdir -p tgz
 cd tgz
 
 # Download 
-for i in `cat ../ufl_urls.txt`; do echo $i; wget $i; done
+# for i in `cat ../ufl_urls_continue.txt`; do echo $i; wget --continue $i; done
 
 # Unpack
 for i in `cat ../ufl_matrices.txt`; do gunzip $i.tar.gz; tar -xvf $i.tar; rm $i.tar; done

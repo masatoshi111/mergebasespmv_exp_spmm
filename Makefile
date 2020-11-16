@@ -130,7 +130,7 @@ endif
 
 # OMP compiler
 OMPCC=icpc
-OMPCC_FLAGS=-openmp -O3 -lrt -fno-alias -xHost -lnuma -O3 -mkl
+OMPCC_FLAGS=-qopenmp -O3 -lrt -fno-alias -xHost -lnuma -O3 -mkl
 
 # Includes
 INC += -I$(CUB_DIR) -I$(CUB_DIR)test 
@@ -153,7 +153,7 @@ DEPS = 	$(call rwildcard, $(CUB_DIR),*.cuh) \
 #-------------------------------------------------------------------------------
 
 clean :
-	rm -f _gpu_spmv_driver _cpu_spmv_driver
+	rm -f _gpu_spmv_driver _cpu_spmv_driver _cpu_spmm_driver
 
 		
 #-------------------------------------------------------------------------------
@@ -171,3 +171,5 @@ gpu_spmv : gpu_spmv.cu $(DEPS)
 cpu_spmv : cpu_spmv.cpp $(DEPS)
 	$(OMPCC) $(DEFINES) -DCUB_MKL -o _cpu_spmv_driver cpu_spmv.cpp $(OMPCC_FLAGS)
 
+cpu_spmm : cpu_spmm.cpp $(DEPS)
+	$(OMPCC) $(DEFINES) -DCUB_MKL -o _cpu_spmm_driver cpu_spmm.cpp $(OMPCC_FLAGS)
