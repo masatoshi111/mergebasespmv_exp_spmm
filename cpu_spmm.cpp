@@ -279,6 +279,12 @@ void SpmvGold(
 //---------------------------------------------------------------------
 // CPU normal omp SpMV
 //---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+// CPU normal omp SpMV
+//---------------------------------------------------------------------
+
 template <
     typename ValueT,
     typename OffsetT>
@@ -487,91 +493,6 @@ float TestOmpMergeCsrmv(
 
 
 //---------------------------------------------------------------------
-// MKL SpMV
-//---------------------------------------------------------------------
-
-/**
- * MKL CPU SpMV (specialized for fp32)
- */
-template <typename OffsetT>
-void MklCsrmv(
-    int                           num_threads,
-    CsrMatrix<float, OffsetT>&    a,
-    OffsetT*    __restrict        row_end_offsets,    ///< Merge list A (row end-offsets)
-    OffsetT*    __restrict        column_indices,
-    float*      __restrict        values,
-    float*      __restrict        vector_x,
-    float*      __restrict        vector_y_out)
-{
-    mkl_cspblas_scsrgemv("n", &a.num_rows, a.values, a.row_offsets, a.column_indices, vector_x, vector_y_out);
-}
-
-/**
- * MKL CPU SpMV (specialized for fp64)
- */
-template <typename OffsetT>
-void MklCsrmv(
-    int                           num_threads,
-    CsrMatrix<double, OffsetT>&   a,
-    OffsetT*    __restrict        row_end_offsets,    ///< Merge list A (row end-offsets)
-    OffsetT*    __restrict        column_indices,
-    double*     __restrict        values,
-    double*     __restrict        vector_x,
-    double*     __restrict        vector_y_out)
-{
-    mkl_cspblas_dcsrgemv("n", &a.num_rows, a.values, a.row_offsets, a.column_indices, vector_x, vector_y_out);
-}
-
-
-/**
- * Run MKL CsrMV
- */
-template <
-    typename ValueT,
-    typename OffsetT>
-float TestMklCsrmv(
-    CsrMatrix<ValueT, OffsetT>&     a,
-    ValueT*                         vector_x,
-    ValueT*                         reference_vector_y_out,
-    ValueT*                         vector_y_out,
-    int                             timing_iterations,
-    float                           &setup_ms)
-{
-    setup_ms = 0.0;
-
-    // Warmup/correctness
-    memset(vector_y_out, -1, sizeof(ValueT) * a.num_rows);
-    MklCsrmv(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out);
-    if (!g_quiet)
-    {
-        // Check answer
-        int compare = CompareResults(reference_vector_y_out, vector_y_out, a.num_rows, true);
-        printf("\t%s\n", compare ? "FAIL" : "PASS"); fflush(stdout);
-
-    // memset(vector_y_out, -1, sizeof(ValueT) * a.num_rows);
-    }
-
-    // Re-populate caches, etc.
-    MklCsrmv(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out);
-    MklCsrmv(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out);
-    MklCsrmv(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out);
-
-    // Timing
-    float elapsed_ms = 0.0;
-    CpuTimer timer;
-    timer.Start();
-    for(int it = 0; it < timing_iterations; ++it)
-    {
-        MklCsrmv(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out);
-    }
-    timer.Stop();
-    elapsed_ms += timer.ElapsedMillis();
-
-    return elapsed_ms / timing_iterations;
-}
-
-
-//---------------------------------------------------------------------
 // Test generation
 //---------------------------------------------------------------------
 
@@ -625,6 +546,9 @@ void RunTests(
     int                 timing_iterations,
     CommandLineArgs&    args)
 {
+    // あとで変更
+    int num_vectors = 1000;
+
     // Initialize matrix in COO form
     CooMatrix<ValueT, OffsetT> coo_matrix;
 
@@ -691,6 +615,7 @@ void RunTests(
     if (timing_iterations == -1)
     {
         timing_iterations = std::min(200000ull, std::max(100ull, ((16ull << 30) / csr_matrix.num_nonzeros)));
+        timing_iterations = timing_iterations / num_vectors;
         if (!g_quiet)
             printf("\t%d timing iterations\n", timing_iterations);
     }
@@ -701,23 +626,23 @@ void RunTests(
     if (csr_matrix.IsNumaMalloc())
     {
         vector_x                = (ValueT*) numa_alloc_onnode(sizeof(ValueT) * csr_matrix.num_cols, 0);
-        vector_y_in             = (ValueT*) numa_alloc_onnode(sizeof(ValueT) * csr_matrix.num_rows, 0);
+        vector_y_in             = (ValueT*) numa_alloc_onnode(sizeof(ValueT) * csr_matrix.num_rows * num_vectors, 0);
         reference_vector_y_out  = (ValueT*) numa_alloc_onnode(sizeof(ValueT) * csr_matrix.num_rows, 0);
-        vector_y_out            = (ValueT*) numa_alloc_onnode(sizeof(ValueT) * csr_matrix.num_rows, 0);
+        vector_y_out            = (ValueT*) numa_alloc_onnode(sizeof(ValueT) * csr_matrix.num_rows * num_vectors, 0);
     }
     else
     {
         vector_x                = (ValueT*) mkl_malloc(sizeof(ValueT) * csr_matrix.num_cols, 4096);
-        vector_y_in             = (ValueT*) mkl_malloc(sizeof(ValueT) * csr_matrix.num_rows, 4096);
+        vector_y_in             = (ValueT*) mkl_malloc(sizeof(ValueT) * csr_matrix.num_rows * num_vectors, 4096);
         reference_vector_y_out  = (ValueT*) mkl_malloc(sizeof(ValueT) * csr_matrix.num_rows, 4096);
-        vector_y_out            = (ValueT*) mkl_malloc(sizeof(ValueT) * csr_matrix.num_rows, 4096);
+        vector_y_out            = (ValueT*) mkl_malloc(sizeof(ValueT) * csr_matrix.num_rows * num_vectors, 4096);
     }
 
     for (int col = 0; col < csr_matrix.num_cols; ++col)
         vector_x[col] = 1.0;
 
-    for (int row = 0; row < csr_matrix.num_rows; ++row)
-        vector_y_in[row] = 1.0;
+    for (int row = 0; row < csr_matrix.num_rows * num_vectors; ++row)
+        vector_y_in[row] = row / csr_matrix.num_rows + 1;
 
     // Compute reference answer
     SpmvGold(csr_matrix, vector_x, vector_y_in, reference_vector_y_out, alpha, beta);
@@ -728,12 +653,6 @@ void RunTests(
     if (!g_quiet) printf("\n\n");
     printf("Simple CsrMV, "); fflush(stdout);
     avg_ms = TestOmpCsrSpmv(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms);
-    DisplayPerf(setup_ms, avg_ms, csr_matrix);
-
-    // MKL SpMV
-    if (!g_quiet) printf("\n\n");
-    printf("MKL CsrMV, "); fflush(stdout);
-    avg_ms = TestMklCsrmv(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms);
     DisplayPerf(setup_ms, avg_ms, csr_matrix);
 
     // Merge SpMV

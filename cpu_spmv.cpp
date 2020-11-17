@@ -276,6 +276,88 @@ void SpmvGold(
     }
 }
 
+//---------------------------------------------------------------------
+// CPU normal omp SpMV
+//---------------------------------------------------------------------
+
+template <
+    typename ValueT,
+    typename OffsetT>
+void OmpCsrSpmv(
+    int                             num_threads,
+    CsrMatrix<ValueT, OffsetT>&     a,
+    ValueT*                         vector_x,
+    ValueT*                         vector_y_out)
+{
+    #pragma omp parallel for schedule(static) num_threads(num_threads)
+    for (OffsetT row = 0; row < a.num_rows; ++row)
+    {
+        ValueT partial = 0;
+        
+        for (
+            OffsetT offset = a.row_offsets[row];
+            offset < a.row_offsets[row + 1];
+            ++offset)
+        {
+            partial += a.values[offset] * vector_x[a.column_indices[offset]];
+        }
+        vector_y_out[row] = partial;
+    }
+}
+
+
+/**
+ * Run OmpCsrSpmv
+ */
+template <
+    typename ValueT,
+    typename OffsetT>
+float TestOmpCsrSpmv(
+    CsrMatrix<ValueT, OffsetT>&     a,
+    ValueT*                         vector_x,
+    ValueT*                         reference_vector_y_out,
+    ValueT*                         vector_y_out,
+    int                             timing_iterations,
+    float                           &setup_ms)
+{
+    setup_ms = 0.0;
+
+    if (g_omp_threads == -1)
+        g_omp_threads = omp_get_num_procs();
+    int num_threads = g_omp_threads;
+
+    if (!g_quiet)
+        printf("\tUsing %d threads on %d procs\n", g_omp_threads, omp_get_num_procs());
+
+    // Warmup/correctness
+    memset(vector_y_out, -1, sizeof(ValueT) * a.num_rows);
+    OmpCsrSpmv(g_omp_threads, a, vector_x, vector_y_out);
+    if (!g_quiet)
+    {
+        // Check answer
+        int compare = CompareResults(reference_vector_y_out, vector_y_out, a.num_rows, true);
+        printf("\t%s\n", compare ? "FAIL" : "PASS"); fflush(stdout);
+    }
+ 
+    // Re-populate caches, etc.
+    OmpCsrSpmv(g_omp_threads, a, vector_x, vector_y_out);
+    OmpCsrSpmv(g_omp_threads, a, vector_x, vector_y_out);
+    OmpCsrSpmv(g_omp_threads, a, vector_x, vector_y_out);
+    
+    // Timing
+    float elapsed_ms = 0.0;
+    CpuTimer timer;
+    timer.Start();
+    for(int it = 0; it < timing_iterations; ++it)
+    {
+        OmpCsrSpmv(g_omp_threads, a, vector_x, vector_y_out);
+    }
+    timer.Stop();
+    elapsed_ms += timer.ElapsedMillis();
+
+    return elapsed_ms / timing_iterations;
+}
+
 
 
 //---------------------------------------------------------------------
@@ -468,7 +550,7 @@ float TestMklCsrmv(
         int compare = CompareResults(reference_vector_y_out, vector_y_out, a.num_rows, true);
         printf("\t%s\n", compare ? "FAIL" : "PASS"); fflush(stdout);
 
-//        memset(vector_y_out, -1, sizeof(ValueT) * a.num_rows);
+        // memset(vector_y_out, -1, sizeof(ValueT) * a.num_rows);
     }
 
     // Re-populate caches, etc.
@@ -643,6 +725,12 @@ void RunTests(
     SpmvGold(csr_matrix, vector_x, vector_y_in, reference_vector_y_out, alpha, beta);
 
     float avg_ms, setup_ms;
+
+    // Simple SpMV
+    if (!g_quiet) printf("\n\n");
+    printf("Simple CsrMV, "); fflush(stdout);
+    avg_ms = TestOmpCsrSpmv(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms);
+    DisplayPerf(setup_ms, avg_ms, csr_matrix);
 
     // MKL SpMV
     if (!g_quiet) printf("\n\n");
