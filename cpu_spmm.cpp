@@ -288,42 +288,55 @@ void SpmvGold(
 template <
     typename ValueT,
     typename OffsetT>
-void OmpCsrSpmv(
+void OmpCsrSpmm(
     int                             num_threads,
     CsrMatrix<ValueT, OffsetT>&     a,
     ValueT*                         vector_x,
-    ValueT*                         vector_y_out)
+    ValueT*                         vector_y_out,
+    int                             num_vectors)
 {
+    int num_cols = a.num_cols;
+    int num_rows = a.num_rows;
     #pragma omp parallel for schedule(static) num_threads(num_threads)
     for (OffsetT row = 0; row < a.num_rows; ++row)
     {
+        // ValueT *partial;
+        // for (int i=0; i<num_vectors; i++){
+        //     partial[i] = 0;
+        // }
         ValueT partial = 0;
-        
         for (
             OffsetT offset = a.row_offsets[row];
             offset < a.row_offsets[row + 1];
             ++offset)
         {
-            partial += a.values[offset] * vector_x[a.column_indices[offset]];
+            ValueT val = a.values[offset];
+            int ind = a.column_indices[offset];
+            for (int i=0; i<num_vectors; i++){
+                partial += val * vector_x[ind + i * num_cols];
+                vector_y_out[row + i * num_rows] = partial;
+                // vector_y_out[row+i] = val * vector_x[ind+i];  // prefetchの効き
+                // partial  = val * vector_x[ind + i * num_cols];
+            }
         }
-        vector_y_out[row] = partial;
     }
 }
 
 
 /**
- * Run OmpCsrSpmv
+ * Run OmpCsrSpmm
  */
 template <
     typename ValueT,
     typename OffsetT>
-float TestOmpCsrSpmv(
+float TestOmpCsrSpmm(
     CsrMatrix<ValueT, OffsetT>&     a,
     ValueT*                         vector_x,
     ValueT*                         reference_vector_y_out,
     ValueT*                         vector_y_out,
     int                             timing_iterations,
-    float                           &setup_ms)
+    float                           &setup_ms,
+    int                             num_vectors)
 {
     setup_ms = 0.0;
 
@@ -335,8 +348,8 @@ float TestOmpCsrSpmv(
         printf("\tUsing %d threads on %d procs\n", g_omp_threads, omp_get_num_procs());
 
     // Warmup/correctness
-    memset(vector_y_out, -1, sizeof(ValueT) * a.num_rows);
-    OmpCsrSpmv(g_omp_threads, a, vector_x, vector_y_out);
+    memset(vector_y_out, -1, sizeof(ValueT) * a.num_rows * num_vectors);
+    OmpCsrSpmm(g_omp_threads, a, vector_x, vector_y_out, num_vectors);
     if (!g_quiet)
     {
         // Check answer
@@ -345,9 +358,9 @@ float TestOmpCsrSpmv(
     }
  
     // Re-populate caches, etc.
-    OmpCsrSpmv(g_omp_threads, a, vector_x, vector_y_out);
-    OmpCsrSpmv(g_omp_threads, a, vector_x, vector_y_out);
-    OmpCsrSpmv(g_omp_threads, a, vector_x, vector_y_out);
+    OmpCsrSpmm(g_omp_threads, a, vector_x, vector_y_out, num_vectors);
+    OmpCsrSpmm(g_omp_threads, a, vector_x, vector_y_out, num_vectors);
+    OmpCsrSpmm(g_omp_threads, a, vector_x, vector_y_out, num_vectors);
     
     // Timing
     float elapsed_ms = 0.0;
@@ -355,7 +368,7 @@ float TestOmpCsrSpmv(
     timer.Start();
     for(int it = 0; it < timing_iterations; ++it)
     {
-        OmpCsrSpmv(g_omp_threads, a, vector_x, vector_y_out);
+        OmpCsrSpmm(g_omp_threads, a, vector_x, vector_y_out, num_vectors);
     }
     timer.Stop();
     elapsed_ms += timer.ElapsedMillis();
@@ -503,13 +516,14 @@ template <typename ValueT, typename OffsetT>
 void DisplayPerf(
     double                          setup_ms,
     double                          avg_ms,
-    CsrMatrix<ValueT, OffsetT>&     csr_matrix)
+    CsrMatrix<ValueT, OffsetT>&     csr_matrix,
+    int                             num_vectors)
 {
     double nz_throughput, effective_bandwidth;
     size_t total_bytes = (csr_matrix.num_nonzeros * (sizeof(ValueT) * 2 + sizeof(OffsetT))) +
-        (csr_matrix.num_rows) * (sizeof(OffsetT) + sizeof(ValueT));
+        (csr_matrix.num_rows * num_vectors) * (sizeof(OffsetT) + sizeof(ValueT));
 
-    nz_throughput       = double(csr_matrix.num_nonzeros) / avg_ms / 1.0e6;
+    nz_throughput       = double(csr_matrix.num_nonzeros*num_vectors) / avg_ms / 1.0e6;
     effective_bandwidth = double(total_bytes) / avg_ms / 1.0e6;
 
     if (!g_quiet)
@@ -625,24 +639,24 @@ void RunTests(
     ValueT *vector_x, *vector_y_in, *reference_vector_y_out, *vector_y_out;
     if (csr_matrix.IsNumaMalloc())
     {
-        vector_x                = (ValueT*) numa_alloc_onnode(sizeof(ValueT) * csr_matrix.num_cols, 0);
-        vector_y_in             = (ValueT*) numa_alloc_onnode(sizeof(ValueT) * csr_matrix.num_rows * num_vectors, 0);
+        vector_x                = (ValueT*) numa_alloc_onnode(sizeof(ValueT) * csr_matrix.num_cols * num_vectors, 0);
+        vector_y_in             = (ValueT*) numa_alloc_onnode(sizeof(ValueT) * csr_matrix.num_rows, 0);
         reference_vector_y_out  = (ValueT*) numa_alloc_onnode(sizeof(ValueT) * csr_matrix.num_rows, 0);
         vector_y_out            = (ValueT*) numa_alloc_onnode(sizeof(ValueT) * csr_matrix.num_rows * num_vectors, 0);
     }
     else
     {
-        vector_x                = (ValueT*) mkl_malloc(sizeof(ValueT) * csr_matrix.num_cols, 4096);
-        vector_y_in             = (ValueT*) mkl_malloc(sizeof(ValueT) * csr_matrix.num_rows * num_vectors, 4096);
+        vector_x                = (ValueT*) mkl_malloc(sizeof(ValueT) * csr_matrix.num_cols * num_vectors, 4096);
+        vector_y_in             = (ValueT*) mkl_malloc(sizeof(ValueT) * csr_matrix.num_rows, 4096);
         reference_vector_y_out  = (ValueT*) mkl_malloc(sizeof(ValueT) * csr_matrix.num_rows, 4096);
         vector_y_out            = (ValueT*) mkl_malloc(sizeof(ValueT) * csr_matrix.num_rows * num_vectors, 4096);
     }
 
-    for (int col = 0; col < csr_matrix.num_cols; ++col)
-        vector_x[col] = 1.0;
+    for (int col = 0; col < csr_matrix.num_cols * num_vectors; ++col)
+        vector_x[col] = col / csr_matrix.num_cols + 1.0;
 
-    for (int row = 0; row < csr_matrix.num_rows * num_vectors; ++row)
-        vector_y_in[row] = row / csr_matrix.num_rows + 1;
+    for (int row = 0; row < csr_matrix.num_rows; ++row)
+        vector_y_in[row] = 1;
 
     // Compute reference answer
     SpmvGold(csr_matrix, vector_x, vector_y_in, reference_vector_y_out, alpha, beta);
@@ -652,22 +666,22 @@ void RunTests(
     // Simple SpMV
     if (!g_quiet) printf("\n\n");
     printf("Simple CsrMV, "); fflush(stdout);
-    avg_ms = TestOmpCsrSpmv(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms);
-    DisplayPerf(setup_ms, avg_ms, csr_matrix);
+    avg_ms = TestOmpCsrSpmm(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms, num_vectors);
+    DisplayPerf(setup_ms, avg_ms, csr_matrix, num_vectors);
 
     // Merge SpMV
-    if (!g_quiet) printf("\n\n");
-    printf("Merge CsrMV, "); fflush(stdout);
-    avg_ms = TestOmpMergeCsrmv(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms);
-    DisplayPerf(setup_ms, avg_ms, csr_matrix);
+    // if (!g_quiet) printf("\n\n");
+    // printf("Merge CsrMV, "); fflush(stdout);
+    // avg_ms = TestOmpMergeCsrmv(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms);
+    // DisplayPerf(setup_ms, avg_ms, csr_matrix);
 
     // Cleanup
     if (csr_matrix.IsNumaMalloc())
     {
-        if (vector_x)                   numa_free(vector_x, sizeof(ValueT) * csr_matrix.num_cols);
+        if (vector_x)                   numa_free(vector_x, sizeof(ValueT) * csr_matrix.num_cols * num_vectors);
         if (vector_y_in)                numa_free(vector_y_in, sizeof(ValueT) * csr_matrix.num_rows);
         if (reference_vector_y_out)     numa_free(reference_vector_y_out, sizeof(ValueT) * csr_matrix.num_rows);
-        if (vector_y_out)               numa_free(vector_y_out, sizeof(ValueT) * csr_matrix.num_rows);
+        if (vector_y_out)               numa_free(vector_y_out, sizeof(ValueT) * csr_matrix.num_rows * num_vectors);
     }
     else
     {
