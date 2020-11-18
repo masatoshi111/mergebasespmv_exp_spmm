@@ -300,11 +300,7 @@ void OmpCsrSpmm(
     #pragma omp parallel for schedule(static) num_threads(num_threads)
     for (OffsetT row = 0; row < a.num_rows; ++row)
     {
-        // ValueT *partial;
-        // for (int i=0; i<num_vectors; i++){
-        //     partial[i] = 0;
-        // }
-        ValueT partial = 0;
+        ValueT partial[num_vectors] = {0};
         for (
             OffsetT offset = a.row_offsets[row];
             offset < a.row_offsets[row + 1];
@@ -313,11 +309,49 @@ void OmpCsrSpmm(
             ValueT val = a.values[offset];
             int ind = a.column_indices[offset];
             for (int i=0; i<num_vectors; i++){
-                partial += val * vector_x[ind + i * num_cols];
-                vector_y_out[row + i * num_rows] = partial;
+                partial[i] += val * vector_x[ind + i * num_cols];
                 // vector_y_out[row+i] = val * vector_x[ind+i];  // prefetchの効き
                 // partial  = val * vector_x[ind + i * num_cols];
+            }   
+        }
+        for (int i=0; i<num_vectors; i++){
+            vector_y_out[row + i * num_rows] = partial[i];
+            partial[i] = 0;
+        }
+    }
+}
+
+template <
+    typename ValueT,
+    typename OffsetT>
+void OmpCsrSpmmT(
+    int                             num_threads,
+    CsrMatrix<ValueT, OffsetT>&     a,
+    ValueT*                         vector_x,
+    ValueT*                         vector_y_out,
+    int                             num_vectors)
+{
+    int num_cols = a.num_cols;
+    int num_rows = a.num_rows;
+    #pragma omp parallel for schedule(static) num_threads(num_threads)
+    for (OffsetT row = 0; row < a.num_rows; ++row)
+    {
+        ValueT partial[num_vectors] = {0};
+        
+        for (
+            OffsetT offset = a.row_offsets[row];
+            offset < a.row_offsets[row + 1];
+            ++offset)
+        {
+            ValueT val = a.values[offset];
+            int ind = a.column_indices[offset];
+            for (int i=0; i<num_vectors; i++){
+                partial[i] += val * vector_x[ind*num_vectors + i];
             }
+        }
+        for (int i=0; i<num_vectors; i++){
+            vector_y_out[row + i * num_rows] = partial[i];
+            partial[i] = 0;
         }
     }
 }
@@ -376,6 +410,55 @@ float TestOmpCsrSpmm(
     return elapsed_ms / timing_iterations;
 }
 
+template <
+    typename ValueT,
+    typename OffsetT>
+float TestOmpCsrSpmmT(
+    CsrMatrix<ValueT, OffsetT>&     a,
+    ValueT*                         vector_x,
+    ValueT*                         reference_vector_y_out,
+    ValueT*                         vector_y_out,
+    int                             timing_iterations,
+    float                           &setup_ms,
+    int                             num_vectors)
+{
+    setup_ms = 0.0;
+
+    if (g_omp_threads == -1)
+        g_omp_threads = omp_get_num_procs();
+    int num_threads = g_omp_threads;
+
+    if (!g_quiet)
+        printf("\tUsing %d threads on %d procs\n", g_omp_threads, omp_get_num_procs());
+
+    // Warmup/correctness
+    memset(vector_y_out, -1, sizeof(ValueT) * a.num_rows * num_vectors);
+    OmpCsrSpmmT(g_omp_threads, a, vector_x, vector_y_out, num_vectors);
+    if (!g_quiet)
+    {
+        // Check answer
+        int compare = CompareResults(reference_vector_y_out, vector_y_out, a.num_rows, true);
+        printf("\t%s\n", compare ? "FAIL" : "PASS"); fflush(stdout);
+    }
+ 
+    // Re-populate caches, etc.
+    OmpCsrSpmmT(g_omp_threads, a, vector_x, vector_y_out, num_vectors);
+    OmpCsrSpmmT(g_omp_threads, a, vector_x, vector_y_out, num_vectors);
+    OmpCsrSpmmT(g_omp_threads, a, vector_x, vector_y_out, num_vectors);
+    
+    // Timing
+    float elapsed_ms = 0.0;
+    CpuTimer timer;
+    timer.Start();
+    for(int it = 0; it < timing_iterations; ++it)
+    {
+        OmpCsrSpmmT(g_omp_threads, a, vector_x, vector_y_out, num_vectors);
+    }
+    timer.Stop();
+    elapsed_ms += timer.ElapsedMillis();
+
+    return elapsed_ms / timing_iterations;
+}
 
 //---------------------------------------------------------------------
 // CPU merge-based SpMV
@@ -653,7 +736,8 @@ void RunTests(
     }
 
     for (int col = 0; col < csr_matrix.num_cols * num_vectors; ++col)
-        vector_x[col] = col / csr_matrix.num_cols + 1.0;
+        // vector_x[col] = col / csr_matrix.num_cols + 1.0;
+        vector_x[col] = 1.0;
 
     for (int row = 0; row < csr_matrix.num_rows; ++row)
         vector_y_in[row] = 1;
@@ -663,10 +747,16 @@ void RunTests(
 
     float avg_ms, setup_ms;
 
-    // Simple SpMV
+    // Simple SpMM
     if (!g_quiet) printf("\n\n");
-    printf("Simple CsrMV, "); fflush(stdout);
+    printf("Simple CsrMM, "); fflush(stdout);
     avg_ms = TestOmpCsrSpmm(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms, num_vectors);
+    DisplayPerf(setup_ms, avg_ms, csr_matrix, num_vectors);
+
+    // Simple SpMMT
+    if (!g_quiet) printf("\n\n");
+    printf("Simple CsrMMT, "); fflush(stdout);
+    avg_ms = TestOmpCsrSpmmT(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms, num_vectors);
     DisplayPerf(setup_ms, avg_ms, csr_matrix, num_vectors);
 
     // Merge SpMV
