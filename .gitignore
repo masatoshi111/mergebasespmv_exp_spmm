@@ -2,3 +2,4 @@ _cpu_spmv_driver
 _cpu_spmm_driver
 _gpu_spmv_driver
 mtx*
+core
