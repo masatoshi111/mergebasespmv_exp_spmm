@@ -874,7 +874,7 @@ int main(int argc, char **argv)
     args.GetCmdLineArgument("alpha", alpha);
     args.GetCmdLineArgument("beta", beta);
     args.GetCmdLineArgument("threads", g_omp_threads);
-    args.GetCmdLineArgument("num_vectors", num_vectors)
+    args.GetCmdLineArgument("num_vectors", num_vectors);
 
     // Run test(s)
     if (fp32)
