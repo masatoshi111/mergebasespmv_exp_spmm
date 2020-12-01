@@ -675,11 +675,9 @@ void RunTests(
     int                 wheel,
     int                 dense,
     int                 timing_iterations,
+    int                 num_vectors,
     CommandLineArgs&    args)
 {
-    // あとで変更
-    int num_vectors = 500;
-
     // Initialize matrix in COO form
     CooMatrix<ValueT, OffsetT> coo_matrix;
 
@@ -862,6 +860,7 @@ int main(int argc, char **argv)
     int                 timing_iterations   = -1;
     float               alpha               = 1.0;
     float               beta                = 0.0;
+    int                 num_vectors         = 500;
 
     g_verbose = args.CheckCmdLineFlag("v");
     g_verbose2 = args.CheckCmdLineFlag("v2");
@@ -875,15 +874,16 @@ int main(int argc, char **argv)
     args.GetCmdLineArgument("alpha", alpha);
     args.GetCmdLineArgument("beta", beta);
     args.GetCmdLineArgument("threads", g_omp_threads);
+    args.GetCmdLineArgument("num_vectors", num_vectors)
 
     // Run test(s)
     if (fp32)
     {
-        RunTests<float, int>(alpha, beta, mtx_filename, grid2d, grid3d, wheel, dense, timing_iterations, args);
+        RunTests<float, int>(alpha, beta, mtx_filename, grid2d, grid3d, wheel, dense, timing_iterations, num_vectors, args);
     }
     else
     {
-        RunTests<double, int>(alpha, beta, mtx_filename, grid2d, grid3d, wheel, dense, timing_iterations, args);
+        RunTests<double, int>(alpha, beta, mtx_filename, grid2d, grid3d, wheel, dense, timing_iterations, num_vectors, args);
     }
 
     printf("\n");
