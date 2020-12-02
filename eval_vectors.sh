@@ -1,7 +1,7 @@
 #!/bin/bash
 
 if (( $# != 2 )); then
-  echo "$0 <mtx dataset dir> <cpu_spmv | gpu_spmv [--device=...]>"
+  echo "$0 <mtx data path> <cpu_spmv | gpu_spmv [--device=...]>"
   exit 0
 fi
 
@@ -11,8 +11,8 @@ MTX_PATH=$1
 
 shift
 
-for i in `seq 10 10 500`
+for i in `seq 200 200 3000`
 do
-    printf "%d," $i
-    ./$@ --quiet --mtx=$1 --num_vectors=$i
+    printf "%d, " $i
+    ./$@ --quiet --mtx=$MTX_PATH --num_vectors=$i
 done
