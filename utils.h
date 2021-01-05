@@ -741,6 +741,18 @@ int CompareResults(double* computed, double* reference, OffsetT len, bool verbos
     return 0;
 }
 
+template <typename ValueT>
+void transpose(ValueT* dst, const ValueT* src, size_t n, size_t p) {
+    size_t block = 32;
+    for (size_t i = 0; i < n; i += block) {
+        for(size_t j = 0; j < p; ++j) {
+            for(size_t b = 0; b < block && i + b < n; ++b) {
+                dst[j*n + i + b] = src[(i + b)*p + j];
+            }
+        }
+    }
+}
+
 
 #ifdef __NVCC__
 

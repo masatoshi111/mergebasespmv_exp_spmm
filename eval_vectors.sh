@@ -7,12 +7,16 @@ fi
 
 echo "num_vectors, file, num_rows, num_cols, num_nonzeros, row_length_mean, row_length_std_dev, row_length_variation, row_length_skewness, method_name, setup_ms, avg_spmv_ms, gflops, effective_GBs"
 
-MTX_PATH=$1
+MTX_DIR=$1
 
 shift
 
-for i in `seq 200 200 3000`
+for i in `find $MTX_DIR -name *.mtx`
 do
-    printf "%d, " $i
-    ./$@ --quiet --mtx=$MTX_PATH --num_vectors=$i
+# for j in `seq 1 1 12`
+for j in 1 2 4 8 16 32 64 128 256 512 1024 2048 
+do
+    printf "%d, " $j
+    ./$@ --quiet --mtx=$i --num_vectors=$j --threads=18
+done
 done

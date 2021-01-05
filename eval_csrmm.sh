@@ -13,5 +13,5 @@ shift
 
 for i in `find $MTX_DIR -name *.mtx`
 do
-    ./$@ --quiet --mtx=$i
+    ./$@ --quiet --mtx=$i --threads=17
 done

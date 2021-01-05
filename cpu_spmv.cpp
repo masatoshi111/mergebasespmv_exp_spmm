@@ -716,7 +716,7 @@ void RunTests(
     }
 
     for (int col = 0; col < csr_matrix.num_cols; ++col)
-        vector_x[col] = 1.0;
+        vector_x[col] = 0.0019;
 
     for (int row = 0; row < csr_matrix.num_rows; ++row)
         vector_y_in[row] = 1.0;

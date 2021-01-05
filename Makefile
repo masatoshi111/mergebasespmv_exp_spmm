@@ -131,7 +131,9 @@ endif
 # OMP compiler
 OMPCC=icpc
 OMPCC_FLAGS=-qopenmp -O3 -lrt -fno-alias -xHost -lnuma -O3 -mkl
-
+OMPCC_FLAGS2=-qopenmp -lrt -fno-alias -xHost -lnuma -mkl
+OMPCC_FLAGS3=-qopenmp -O3 -lrt -fno-alias -xHost -lnuma -O3 -mkl
+ 
 # Includes
 INC += -I$(CUB_DIR) -I$(CUB_DIR)test 
 
@@ -172,4 +174,4 @@ cpu_spmv : cpu_spmv.cpp $(DEPS)
 	$(OMPCC) $(DEFINES) -DCUB_MKL -o _cpu_spmv_driver cpu_spmv.cpp $(OMPCC_FLAGS)
 
 cpu_spmm : cpu_spmm.cpp $(DEPS)
-	$(OMPCC) $(DEFINES) -DCUB_MKL -o _cpu_spmm_driver cpu_spmm.cpp $(OMPCC_FLAGS)
+	$(OMPCC) $(DEFINES) -DCUB_MKL -o _cpu_spmm_driver cpu_spmm.cpp $(OMPCC_FLAGS3)
