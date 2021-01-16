@@ -57,6 +57,7 @@
 #include <sstream>
 #include <iostream>
 #include <limits>
+#include <immintrin.h>
 
 #include <mkl.h>
 
@@ -209,6 +210,12 @@ struct CountingInputIterator
 };
 
 
+// mkl gemm
+// void cblas_dgemm (const CBLAS_LAYOUT Layout, const CBLAS_TRANSPOSE transa, const CBLAS_TRANSPOSE transb, const MKL_INT m, const MKL_INT n, const MKL_INT k, 
+// const double alpha, const double *a, const MKL_INT lda, const double *b, const MKL_INT ldb, const double beta, double *c, const MKL_INT ldc);
+// cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, 3, 2, 4, 1.0, a, 2, b, 4, 0.0, c, 4);
+
+
 
 //---------------------------------------------------------------------
 // MergePath Search
@@ -314,7 +321,6 @@ void OmpCsrSpmmT(
     for (OffsetT row = 0; row < a.num_rows; ++row)
     {
         ValueT partial[num_vectors] = {0.0};
-        
         for (
             OffsetT offset = a.row_offsets[row];
             offset < a.row_offsets[row + 1];
@@ -434,9 +440,10 @@ float TestOmpCsrSpmmT(
     }
  
     // Re-populate caches, etc.
-    OmpCsrSpmmT(g_omp_threads, a, vector_x, vector_y_out, num_vectors, vector_x_row_major);
-    OmpCsrSpmmT(g_omp_threads, a, vector_x, vector_y_out, num_vectors, vector_x_row_major);
-    OmpCsrSpmmT(g_omp_threads, a, vector_x, vector_y_out, num_vectors, vector_x_row_major);
+    for(int it = 0; it < timing_iterations; ++it)
+    {
+        OmpCsrSpmmT(g_omp_threads, a, vector_x, vector_y_out, num_vectors, vector_x_row_major);
+    }
     
     // Timing
     float elapsed_ms = 0.0;
@@ -475,10 +482,7 @@ float TestOmpCsrSymSpmm(
         printf("\tUsing %d threads on %d procs\n", g_omp_threads, omp_get_num_procs());
 
     // Warmup/correctness
-    memset(vector_y_out, 0.0, sizeof(ValueT) * a.num_rows * num_vectors);
-    for (int i=0; i<a.num_rows * num_vectors; i++){
-        vector_y_out[i] = 0.0;
-    }
+    memset(vector_y_out, -1, sizeof(ValueT) * a.num_rows * num_vectors);
     OmpCsrSymSpmm(g_omp_threads, a, vector_x, vector_y_out, num_vectors, vector_x_row_major);
     if (!g_quiet)
     {
@@ -496,9 +500,10 @@ float TestOmpCsrSymSpmm(
     }
  
     // Re-populate caches, etc.
-    OmpCsrSymSpmm(g_omp_threads, a, vector_x, vector_y_out, num_vectors, vector_x_row_major);
-    OmpCsrSymSpmm(g_omp_threads, a, vector_x, vector_y_out, num_vectors, vector_x_row_major);
-    OmpCsrSymSpmm(g_omp_threads, a, vector_x, vector_y_out, num_vectors, vector_x_row_major);
+    for(int it = 0; it < timing_iterations; ++it)
+    {
+        OmpCsrSymSpmm(g_omp_threads, a, vector_x, vector_y_out, num_vectors, vector_x_row_major);
+    }
     
     // Timing
     float elapsed_ms = 0.0;
@@ -603,10 +608,11 @@ float TestMKLCsrmm(
     }
 
     // Re-populate caches, etc.
-    MKLCsrmm(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out, num_vectors);
-    MKLCsrmm(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out, num_vectors);
-    MKLCsrmm(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out, num_vectors);
-
+    for(int it = 0; it < timing_iterations; ++it)
+    {
+        MKLCsrmm(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out, num_vectors);
+    }
+    
     // Timing
     float elapsed_ms = 0.0;
     CpuTimer timer;
@@ -681,40 +687,47 @@ void OmpMergeCsrmm(
         MergePathSearch(end_diagonal, row_end_offsets, nonzero_indices, a.num_rows, a.num_nonzeros, thread_coord_end);
 
         // Consume whole rows
+        ValueT running_total[num_vectors] = {0.0};
+        ValueT val;
+        int ind;
+        ValueT* tmp;
         for (; thread_coord.x < thread_coord_end.x; ++thread_coord.x)
         {
-            ValueT running_total[num_vectors] = {0.0};
             for (; thread_coord.y < row_end_offsets[thread_coord.x]; ++thread_coord.y)
             {
-                ValueT val = values[thread_coord.y];
-                int ind = column_indices[thread_coord.y]*num_vectors;
+                val = values[thread_coord.y];
+                ind = column_indices[thread_coord.y]*num_vectors;
+                tmp = vector_x_row_major+ind;
                 for (int i=0; i<num_vectors; i++){
-                    running_total[i] += val * vector_x_row_major[ind + i];
+                    running_total[i] += val * tmp[i];
                 }
             }
             if (g_output_row_major)
             {
-                int ind = thread_coord.x*num_vectors;
+                ind = thread_coord.x*num_vectors;
+                tmp = vector_y_out+ind;
                 for (int i=0; i<num_vectors; i++){
-                    vector_y_out[ind + i] = running_total[i];
+                    tmp[i] = running_total[i];
+                    running_total[i] = 0.0;
                 }
             }
             else
             {
                 for (int i=0; i<num_vectors; i++){
                     vector_y_out[thread_coord.x + i * num_rows] = running_total[i];
+                    running_total[i] = 0.0;
                 }
             }
         }
 
         // Consume partial portion of thread's last row
-        ValueT running_total[num_vectors] = {0.0};
         for (; thread_coord.y < thread_coord_end.y; ++thread_coord.y)
         {
-            ValueT val = values[thread_coord.y];
-            int ind = column_indices[thread_coord.y]*num_vectors;
+            val = values[thread_coord.y];
+            ind = column_indices[thread_coord.y]*num_vectors;
+            tmp = vector_x_row_major+ind;
             for (int i=0; i<num_vectors; i++){
-                running_total[i] += val * vector_x_row_major[ind + i];
+                running_total[i] += val * tmp[i];
             }
         }
 
@@ -724,14 +737,17 @@ void OmpMergeCsrmm(
     }
 
     // Carry-out fix-up (rows spanning multiple threads)
+    int ind;
+    ValueT* tmp;
     if (g_output_row_major)
     {
         for (int tid = 0; tid < num_threads - 1; ++tid)
         {
             if (row_carry_out[tid] < a.num_rows){
-                int ind = row_carry_out[tid]*num_vectors;
+                ind = row_carry_out[tid]*num_vectors;
+                tmp = vector_y_out+ind;
                 for (int i=0; i<num_vectors; i++){
-                    vector_y_out[ind + i] += value_carry_out[tid][i];
+                    tmp[i] += value_carry_out[tid][i];
                 }
             }
         }
@@ -786,9 +802,10 @@ float TestOmpMergeCsrmm(
     }
  
     // Re-populate caches, etc.
-    OmpMergeCsrmm(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out, num_vectors, vector_x_row_major);
-    OmpMergeCsrmm(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out, num_vectors, vector_x_row_major);
-    OmpMergeCsrmm(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out, num_vectors, vector_x_row_major);
+    for(int it = 0; it < timing_iterations; ++it)
+    {
+        OmpMergeCsrmm(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out, num_vectors, vector_x_row_major);
+    }
 
     // Timing
     float elapsed_ms = 0.0;
@@ -832,8 +849,13 @@ inline void RowPathSearch(
 }
 
 
+inline void mkl_axpy(int n, double a, double* x, double*y){
+    cblas_daxpy(n, a, x, 1, y, 1);
+}
 
-
+inline void mkl_axpy(int n, float a, float* x, float*y){
+    cblas_saxpy(n, a, x, 1, y, 1);
+}
 /**
  * OpenMP CPU row-based SpMM
  */
@@ -889,40 +911,47 @@ void OmpNonzeroSplitCsrmm(
         RowPathSearch(row_end_offsets, nonzero_indices, a.num_rows, a.num_nonzeros, thread_coord_end);
 
         // Consume whole rows
+        ValueT running_total[num_vectors] = {0.0};
+        ValueT val;
+        ValueT* tmp;
+        int ind;
         for (; thread_coord.x < thread_coord_end.x; ++thread_coord.x)
         {
-            ValueT running_total[num_vectors] = {0.0};
             for (; thread_coord.y < row_end_offsets[thread_coord.x]; ++thread_coord.y)
             {
-                ValueT val = values[thread_coord.y];
-                int ind = column_indices[thread_coord.y]*num_vectors;
-                for (int i=0; i<num_vectors; i++){
-                    running_total[i] += val * vector_x_row_major[ind + i];
+                val = values[thread_coord.y];
+                ind = column_indices[thread_coord.y]*num_vectors;
+                tmp = vector_x_row_major+ind;
+                for (int i=0; i<num_vectors; i+=1){
+                    running_total[i] += val * tmp[i];
                 }
             }
             if (g_output_row_major)
             {
-                int ind = thread_coord.x*num_vectors;
+                ind = thread_coord.x*num_vectors;
+                tmp = vector_y_out+ind;
                 for (int i=0; i<num_vectors; i++){
-                    vector_y_out[ind + i] = running_total[i];
+                    tmp[i] = running_total[i];
+                    running_total[i] = 0.0;
                 }
             }
             else
             {
                 for (int i=0; i<num_vectors; i++){
                     vector_y_out[thread_coord.x + i * num_rows] = running_total[i];
+                    running_total[i] = 0.0;
                 }
             }
         }
 
         // Consume partial portion of thread's last row
-        ValueT running_total[num_vectors] = {0.0};
         for (; thread_coord.y < thread_coord_end.y; ++thread_coord.y)
         {
-            ValueT val = values[thread_coord.y];
-            int ind = column_indices[thread_coord.y]*num_vectors;
+            val = values[thread_coord.y];
+            ind = column_indices[thread_coord.y]*num_vectors;
+            tmp = vector_x_row_major+ind;
             for (int i=0; i<num_vectors; i++){
-                running_total[i] += val * vector_x_row_major[ind + i];
+                running_total[i] += val * tmp[i];
             }
         }
 
@@ -932,14 +961,17 @@ void OmpNonzeroSplitCsrmm(
     }
 
     // Carry-out fix-up (rows spanning multiple threads)
+    int ind;
+    ValueT* tmp;
     if (g_output_row_major)
     {
         for (int tid = 0; tid < num_threads - 1; ++tid)
         {
             if (row_carry_out[tid] < a.num_rows){
-                int ind = row_carry_out[tid]*num_vectors;
+                ind = row_carry_out[tid]*num_vectors;
+                tmp = vector_y_out+ind;
                 for (int i=0; i<num_vectors; i++){
-                    vector_y_out[ind + i] += value_carry_out[tid][i];
+                    tmp[i] += value_carry_out[tid][i];
                 }
             }
         }
@@ -998,9 +1030,10 @@ float TestOmpNonzeroSplitCsrmm(
     }
     
     // Re-populate caches, etc.
-    OmpNonzeroSplitCsrmm(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out, num_vectors, vector_x_row_major);
-    OmpNonzeroSplitCsrmm(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out, num_vectors, vector_x_row_major);
-    OmpNonzeroSplitCsrmm(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out, num_vectors, vector_x_row_major);
+    for(int it = 0; it < timing_iterations; ++it)
+    {
+        OmpNonzeroSplitCsrmm(g_omp_threads, a, a.row_offsets + 1, a.column_indices, a.values, vector_x, vector_y_out, num_vectors, vector_x_row_major);
+    }
 
     // Timing
     float elapsed_ms = 0.0;
@@ -1134,6 +1167,23 @@ void RunTests(
     }
     fflush(stdout);
 
+    //  count max-min row nums
+    if (!g_quiet){
+        int max=0;
+        int min=100000000;
+        for(int i=0; i < csr_matrix.num_cols; i++){
+            int diff = csr_matrix.row_offsets[i+1] - csr_matrix.row_offsets[i];
+            if (diff > max){
+                max = diff;
+            }
+            if (diff < min){
+                min = diff;
+            }
+        }
+        printf("min:%d, max:%d\n", min, max);
+    }
+    
+
     // Determine # of timing iterations (aim to run 16 billion nonzeros through, total)
     if (timing_iterations == -1)
     {
@@ -1165,9 +1215,9 @@ void RunTests(
 
     for (int col = 0; col < csr_matrix.num_cols * num_vectors; ++col){
         // vector_x[col] = col / csr_matrix.num_cols + 1.0;
-        vector_x[col] = 12.0;
+        vector_x[col] = 10.0;
         if (g_input_row_major){
-            vector_x_row_major[col] = 12.0;
+            vector_x_row_major[col] = 10.0;
         }
     }
 
@@ -1184,6 +1234,12 @@ void RunTests(
     // printf("Simple CsrMM, "); fflush(stdout);
     // avg_ms = TestOmpCsrSpmm(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms, num_vectors);
     // DisplayPerf(setup_ms, avg_ms, csr_matrix, num_vectors);
+    
+    // col access SpMMT
+    // if (!g_quiet) printf("\n\n");
+    // printf("Simple SymCsrMM, "); fflush(stdout);
+    // avg_ms = TestOmpCsrSymSpmm(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms, num_vectors, vector_x_row_major);
+    // DisplayPerf(setup_ms, avg_ms, csr_matrix, num_vectors);
 
     // Simple SpMMT
     if (!g_quiet) printf("\n\n");
@@ -1191,32 +1247,27 @@ void RunTests(
     avg_ms = TestOmpCsrSpmmT(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms, num_vectors, vector_x_row_major);
     DisplayPerf(setup_ms, avg_ms, csr_matrix, num_vectors);
 
-    // Simple SpMMT
-    // if (!g_quiet) printf("\n\n");
-    // printf("Simple SymCsrMM, "); fflush(stdout);
-    // avg_ms = TestOmpCsrSymSpmm(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms, num_vectors, vector_x_row_major);
-    // DisplayPerf(setup_ms, avg_ms, csr_matrix, num_vectors);
-
     // Merge SpMM
     if (!g_quiet) printf("\n\n");
     printf("Merge CsrMM, "); fflush(stdout);
     avg_ms = TestOmpMergeCsrmm(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms, num_vectors, vector_x_row_major);
     DisplayPerf(setup_ms, avg_ms, csr_matrix, num_vectors);
 
-    // // Row-based SpMM
+    // Row-based SpMM
     if (!g_quiet) printf("\n\n");
     printf("nonzero splitting CsrMM, "); fflush(stdout);
     avg_ms = TestOmpNonzeroSplitCsrmm(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms, num_vectors, vector_x_row_major);
     DisplayPerf(setup_ms, avg_ms, csr_matrix, num_vectors);
 
-    // // MKL SpMM
-    // if (g_input_row_major == g_output_row_major)
-    // {
-    //     if (!g_quiet) printf("\n\n");
-    //     printf("MKL CsrMM, "); fflush(stdout);
-    //     avg_ms = TestMKLCsrmm(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms, num_vectors);
-    //     DisplayPerf(setup_ms, avg_ms, csr_matrix, num_vectors);
-    // }
+    // MKL SpMM
+    if (g_input_row_major == g_output_row_major)
+    {
+        if (!g_quiet) printf("\n\n");
+        printf("MKL CsrMM, "); fflush(stdout);
+        avg_ms = TestMKLCsrmm(csr_matrix, vector_x, reference_vector_y_out, vector_y_out, timing_iterations, setup_ms, num_vectors);
+        DisplayPerf(setup_ms, avg_ms, csr_matrix, num_vectors);
+    }
+
     // Cleanup
     if (csr_matrix.IsNumaMalloc())
     {

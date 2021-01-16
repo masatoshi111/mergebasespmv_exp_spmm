@@ -44,9 +44,9 @@
 #include <list>
 #include <fstream>
 #include <stdio.h>
+#include <numa.h>
 
 #ifdef CUB_MKL
-    #include <numa.h>
     #include <mkl.h>
 #endif
 

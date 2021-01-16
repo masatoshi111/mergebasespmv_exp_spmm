@@ -1,5 +1,5 @@
 #!/bin/bash
-
+sleep 60
 if (( $# != 2 )); then
   echo "$0 <mtx data path> <cpu_spmv | gpu_spmv [--device=...]>"
   exit 0
@@ -14,9 +14,9 @@ shift
 for i in `find $MTX_DIR -name *.mtx`
 do
 # for j in `seq 1 1 12`
-for j in 1 2 4 6 8 10 12 14 16 18
+for j in 1 2 4 6 8 10 12 14 16 17 18
 do
     printf "%d, " $j
-    ./$@ --quiet --mtx=$i --threads=$j --num_vectors=16
+    ./$@ --quiet --mtx=$i --threads=$j --num_vectors=32
 done
 done

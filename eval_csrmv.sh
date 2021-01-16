@@ -1,5 +1,4 @@
 #!/bin/bash
-
 if (( $# != 2 )); then
   echo "$0 <mtx dataset dir> <cpu_spmv | gpu_spmv [--device=...]>"
   exit 0
@@ -13,5 +12,5 @@ shift
 
 for i in `find $MTX_DIR -name *.mtx`
 do
-    ./$@ --quiet --mtx=$i
+    ./$@ --quiet --mtx=$i --threads=17
 done

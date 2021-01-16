@@ -131,8 +131,9 @@ endif
 # OMP compiler
 OMPCC=icpc
 OMPCC_FLAGS=-qopenmp -O3 -lrt -fno-alias -xHost -lnuma -O3 -mkl
-OMPCC_FLAGS2=-qopenmp -lrt -fno-alias -xHost -lnuma -mkl
-OMPCC_FLAGS3=-qopenmp -O3 -lrt -fno-alias -xHost -lnuma -O3 -mkl
+OMPCC_FLAGS_sse=-qopenmp -lrt -fno-alias -xSSE4.2 -lnuma -mkl
+OMPCC_FLAGS_avx512=-qopenmp -O3 -lrt -fno-alias -xCOMMON-AVX512 -lnuma -mkl
+OMPCC_FLAGS_avx=-qopenmp -O3 -lrt -fno-alias -xCORE-AVX2 -lnuma -mkl
  
 # Includes
 INC += -I$(CUB_DIR) -I$(CUB_DIR)test 
@@ -171,7 +172,13 @@ gpu_spmv : gpu_spmv.cu $(DEPS)
 #-------------------------------------------------------------------------------
 
 cpu_spmv : cpu_spmv.cpp $(DEPS)
-	$(OMPCC) $(DEFINES) -DCUB_MKL -o _cpu_spmv_driver cpu_spmv.cpp $(OMPCC_FLAGS)
+	$(OMPCC) $(DEFINES) -DCUB_MKL -o _cpu_spmv_driver cpu_spmv.cpp $(OMPCC_FLAGS_avx512)
 
-cpu_spmm : cpu_spmm.cpp $(DEPS)
-	$(OMPCC) $(DEFINES) -DCUB_MKL -o _cpu_spmm_driver cpu_spmm.cpp $(OMPCC_FLAGS3)
+cpu_spmm : cpu_spmm_v2.cpp $(DEPS)
+	$(OMPCC) $(DEFINES) -DCUB_MKL -o _cpu_spmm_driver cpu_spmm_v2.cpp $(OMPCC_FLAGS_avx512)
+
+axpy : axpy.cpp $(DEPS)
+	$(OMPCC) $(DEFINES) -DCUB_MKL -o test_axpy axpy.cpp $(OMPCC_FLAGS_avx512)
+
+merge_spmm : merge_spmm_test.cpp $(DEPS)
+	$(OMPCC) $(DEFINES) -DCUB_MKL -o merge_spmm merge_spmm_test.cpp $(OMPCC_FLAGS3)
